@@ -1,6 +1,7 @@
 import { Wallet } from "@coinbase/coinbase-sdk";
 import dbConnect from '../../../../lib/dbConnect';
 import Tournament from '../../../../models/Tournament';
+import { verifyAccess } from '../../../../utils/litProtocol';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -15,6 +16,18 @@ export default async function handler(req, res) {
     const tournament = await Tournament.findById(id);
     if (!tournament) {
       return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    // Verify user has access to enter this tournament
+    const hasAccess = await verifyAccess(
+      req.body.userAddress, 
+      tournament.type
+    );
+    
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: 'Access denied. Required conditions not met.' 
+      });
     }
 
     // Always increment currentParticipants as it represents slots used
@@ -47,7 +60,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Error entering tournament:', error);
+    console.error('Tournament entry error:', error);
     res.status(500).json({ error: 'Failed to enter tournament' });
   }
 } 

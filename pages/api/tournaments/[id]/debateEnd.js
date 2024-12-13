@@ -7,6 +7,8 @@ import StoredData from '../../../../models/StoredData';
 
 import axios from 'axios';
 import { EAS, SchemaEncoder, NO_EXPIRATION } from "@ethereum-attestation-service/eas-sdk";
+import { DebateIPManager } from '../../../../utils/storyProtocolIntegration';
+import { createHash } from 'crypto';
 
 // EAS Contract Address and Schema
 const EAS_CONTRACT_ADDRESS = "0x4200000000000000000000000000000000000021";
@@ -184,6 +186,46 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Failed to import wallet' });
       }
     }
+
+    // Generate content hash for IP registration
+    const contentHash = createHash('sha256')
+      .update(JSON.stringify(tournament.messages))
+      .digest('hex');
+
+    // Prepare metadata
+    const metadataUri = `ipfs://${await uploadToIPFS({
+      tournamentId: id,
+      debateTopic: tournament.topic,
+      participantCount: tournament.participants.length,
+      timestamp: new Date().toISOString()
+    })}`;
+
+    const ipManager = new DebateIPManager();
+    
+    // Register debate content and rights
+    const ipRegistration = await ipManager.registerDebateContent({
+      tournamentId: id,
+      creator: tournament.creator,
+      contentHash,
+      metadataHash: createHash('sha256').update(metadataUri).digest('hex'),
+      metadataUri
+    });
+
+    // Attach rights to participants
+    const participantRights = await ipManager.attachDebateRights(
+      ipRegistration.ipId,
+      tournament.participants
+    );
+
+    // Update tournament with IP rights info
+    tournament.ipRights = {
+      ipId: ipRegistration.ipId,
+      collectionAddress: ipRegistration.collection,
+      licenseTermsId: ipRegistration.licenseTermsId,
+      participantTermsId: participantRights.termsId
+    };
+
+    await tournament.save();
 
     // Return the winners along with the success message
     res.status(200).json({ message: 'Debate resolved and prizes distributed', winners: tournament.winners });

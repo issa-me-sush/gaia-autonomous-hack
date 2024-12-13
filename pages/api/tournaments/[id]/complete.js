@@ -1,6 +1,7 @@
 import dbConnect from '../../../../lib/dbConnect';
 import Tournament from '../../../../models/Tournament';
 import { distributePrizes } from '../../../../utils/prizeDistribution';
+import { submitToFlock } from '../../../../utils/flockIntegration';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -10,48 +11,28 @@ export default async function handler(req, res) {
   try {
     await dbConnect();
     const { id } = req.query;
+
     const tournament = await Tournament.findById(id);
-
-    if (!tournament) {
-      return res.status(404).json({ error: 'Tournament not found' });
+    if (!tournament || tournament.status === 'COMPLETED') {
+      return res.status(400).json({ error: 'Invalid tournament or already completed' });
     }
 
-    // Determine winners based on mode
-    let winners = [];
-    switch (tournament.mode) {
-      case 'DEBATE_ARENA':
-        winners = determineDebateWinners(tournament);
-        break;
-      case 'TWENTY_QUESTIONS':
-        winners = determineTwentyQuestionsWinners(tournament);
-        break;
-      case 'AGENT_CHALLENGE':
-        winners = [tournament.participants.find(p => p.hasCompleted)?.address];
-        break;
-    }
-
-    if (!winners.length) {
-      return res.status(400).json({ error: 'No winners found' });
-    }
-
-    // Distribute prizes
-    const transfers = await distributePrizes(tournament, winners);
-
-    // Update tournament status
+    // Original tournament completion logic
     tournament.status = 'COMPLETED';
-    tournament.winners = winners;
-    tournament.prizeDistribution = transfers.map(t => ({
-      address: t.destination,
-      amount: t.amount
-    }));
+    tournament.completedAt = new Date();
+
+    // Submit tournament data to FLock for training
+    try {
+      const flockResult = await submitToFlock(tournament);
+      tournament.flockSubmissionId = flockResult.submissionId;
+      console.log('Successfully submitted to FLock:', flockResult);
+    } catch (flockError) {
+      console.error('FLock submission error:', flockError);
+      // Continue with completion even if FLock submission fails
+    }
 
     await tournament.save();
-
-    res.status(200).json({ 
-      message: 'Tournament completed and prizes distributed',
-      winners,
-      transfers 
-    });
+    res.status(200).json({ success: true, tournament });
 
   } catch (error) {
     console.error('Tournament completion error:', error);

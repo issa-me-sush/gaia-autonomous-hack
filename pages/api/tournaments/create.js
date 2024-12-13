@@ -3,6 +3,8 @@ import dbConnect from '../../../lib/dbConnect';
 import Tournament from '../../../models/Tournament';
 import { TOURNAMENT_MODES } from '../../../config/tournamentModes';
 import { initializeCDP } from "@/utils/cdpConfig";
+import { verifyAccess } from '../../../utils/litProtocol';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -23,8 +25,17 @@ export default async function handler(req, res) {
       duration,
       debateTopic,
       secretTerm,
-      challengeStatement
+      challengeStatement,
+      type = 'REGULAR'
     } = req.body;
+
+    // Verify creator has access to create this tournament type
+    const hasAccess = await verifyAccess(creatorAddress, type);
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: 'Access denied. Required conditions not met.' 
+      });
+    }
 
     // Mode-specific validation
     if (mode === 'DEBATE_ARENA' && !debateTopic) {
